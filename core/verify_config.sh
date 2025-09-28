@@ -14,10 +14,44 @@ verify_config() {
         return 1
     fi
 
+    # Load environment variables if not already loaded
+    if [[ -z "${NEXTCLOUD_DB_PASSWORD:-}" ]]; then
+        log_info "Loading environment variables from $env_file"
+        set -a 
+        source "$env_file"
+        set +a
+    fi
+
     # Check required environment variables
-    local db_pass="${MYSQL_ROOT_PASSWORD:-}"
+    local db_pass="${NEXTCLOUD_DB_PASSWORD:-}"
     if [ -z "$db_pass" ]; then
-        log_error "MYSQL_ROOT_PASSWORD not set"
+        log_error "NEXTCLOUD_DB_PASSWORD not set"
+        return 1
+    fi
+    
+    # Check other required variables
+    if [[ -z "${REMOTE_USER:-}" ]]; then
+        log_error "REMOTE_USER not set"
+        return 1
+    fi
+    
+    if [[ -z "${REMOTE_HOST:-}" ]]; then
+        log_error "REMOTE_HOST not set"
+        return 1
+    fi
+    
+    if [[ -z "${REMOTE_STORAGE_LOCATION:-}" ]]; then
+        log_error "REMOTE_STORAGE_LOCATION not set"
+        return 1
+    fi
+    
+    if [[ -z "${REMOTE_BASE_DIR:-}" ]]; then
+        log_error "REMOTE_BASE_DIR not set"
+        return 1
+    fi
+    
+    if [[ -z "${DUMP_DIR:-}" ]]; then
+        log_error "DUMP_DIR not set"
         return 1
     fi
     
