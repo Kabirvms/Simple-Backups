@@ -45,11 +45,6 @@ verify_config() {
         return 1
     fi
     
-    if [[ -z "${REMOTE_BASE_DIR:-}" ]]; then
-        log_error "REMOTE_BASE_DIR not set"
-        return 1
-    fi
-    
     if [[ -z "${DUMP_DIR:-}" ]]; then
         log_error "DUMP_DIR not set"
         return 1
