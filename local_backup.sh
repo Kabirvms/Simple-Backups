@@ -32,6 +32,10 @@ source "$SCRIPT_DIR/core/container.sh"
 source "$SCRIPT_DIR/core/verify_remote.sh"
 source "$SCRIPT_DIR/core/verify_config.sh"
 
+# === SOURCE INTEGRATIONS SCRIPTS ===
+source "$SCRIPT_DIR/integrations/homeassistant/control_device.sh"
+source "$SCRIPT_DIR/integrations/homeassistant/enitity_update.sh"
+
 # === SOURCE OUTLINE SCRIPTS ===
 source "$SCRIPT_DIR/outline/pre_backup.sh"
 source "$SCRIPT_DIR/outline/backup_items.sh"
@@ -51,31 +55,48 @@ LOG_FILE="$LOGS_DIR/$(date +'%Y%m%d_%H%M%S').log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 log_info "Logging to file: $LOG_FILE"
 
+control_device "switch.desk_loop" "turn_on" 60
+
+control_device "switch.kv_imac" "turn_on" 300
+
 # === MAIN BACKUP WORKFLOW ===
 main() {
+    local exit_code=0
+    
     log_info "Starting Local Backup Process"
+    
+    # Record backup start in Home Assistant
+    backup_started "local"
     
     # Pre-backup setup and verification
     if ! run_pre_backup; then
         log_error "Pre-backup setup failed"
+        backup_finished 1 "Pre-backup setup failed" "local"
         exit 1
     fi
-    
+
     # Run backup tasks
     if ! run_backup_items; then
         log_warning "Backup tasks failed"
-        exit 0
+        backup_finished 2 "Backup tasks failed" "local"
+        exit 2
     fi
     
     # Post-backup operations
     if ! run_post_backup; then
         log_error "Post-backup operations failed"
+        backup_finished 1 "Post-backup operations failed" "local"
         exit 1
     fi
     
     log_info "=== Local Backup Process Completed Successfully ==="
+    control_device "switch.kv_imac" "turn_off" 60
+    control_device "switch.desk_loop" "turn_off" 5
+    log_info "Turning off devices after backup"
+    backup_finished 0 "Success" "local"
     exit 0
 }
 
 # Run main function
 main
+

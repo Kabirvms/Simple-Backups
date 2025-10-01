@@ -102,6 +102,16 @@ run_backup_items() {
         log_warning "Failed to stop ESPHome container"
         exit 2
     fi
+    # Home Assistant Backup
+    log_info "Stopping Home Assistant container..."
+    if manage_containers "stop" homeassistant; then
+        sync_dir "/home/kabir/homeassistant/hass-config/backups/" "$REMOTE_STORAGE_LOCATION/homeassistant" "Home Assistant"
+        log_info "Starting Home Assistant container..."
+        manage_containers "start" homeassistant
+    else
+        log_warning "Failed to stop Home Assistant container"
+        exit 2
+    fi
 
     # Homer Dashboard Backup
     log_info "Stopping Homer Dashboard container..."
