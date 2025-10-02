@@ -60,22 +60,28 @@ LOG_FILE="$LOGS_DIR/$(date +'%Y%m%d_%H%M%S').log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 log_info "Logging to file: $LOG_FILE"
 
-control_device "switch.second_site" "turn_on" 300
+control_device "switch.second_site" "turn_on" 180
 
-log_info "establishing SSH connection to $REMOTE_USER@$REMOTE_HOST"
+log_info "Establishing SSH connection to $REMOTE_USER@$REMOTE_HOST"
 tailscale up 
 sleep 30
+
 if ping -c 1 -W 2 "$REMOTE_HOST" &>/dev/null; then
-    log_info "SSH connection to $REMOTE_USER@$REMOTE_HOST successful"
+    log_info "Connection to $REMOTE_USER@$REMOTE_HOST successful"
 else
     log_error "Unable to reach $REMOTE_USER@$REMOTE_HOST. Please check the connection."
+    # Initialize HA monitoring even for failed connection
+    backup_started "remote"
+    backup_finished 1 "Unable to reach remote host" "remote"
+    control_device "switch.second_site" "turn_off" 30
+    tailscale down
     exit 1
 fi
 # === MAIN BACKUP WORKFLOW ===
 main() {
     local exit_code=0
     
-    log_info "Starting Local Backup Process"
+    log_info "Starting Remote Backup Process"
     
     # Record backup start in Home Assistant
     backup_started "remote"
@@ -109,11 +115,13 @@ main() {
         log_info "Remote host shutdown completed successfully"
     else
         log_warning "Remote host shutdown may have failed or is taking longer than expected"
-        exit 1
+        # Continue with cleanup even if shutdown failed
     fi
+    
     # Turn off the switch after shutdown
     control_device "switch.second_site" "turn_off" 60
     log_info "Turning off devices after backup and shutdown"
+
     tailscale down
     backup_finished 0 "Success" "remote"
     exit 0
