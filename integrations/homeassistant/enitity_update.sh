@@ -112,20 +112,21 @@ ha_ensure_entities() {
         return 0
     fi
     
-    echo "Ensuring entities are available for: $backup_type"
+    echo "Checking if entities exist for: $backup_type"
     
-    # Check if main status entity exists, if not reinitialize all
+    # Check if main status entity exists
     local response
     response=$(curl -s -X GET \
         -H "Authorization: Bearer $HA_TOKEN" \
         "$HA_URL/api/states/sensor.backup_${backup_type}_status" 2>/dev/null)
     
-    if [[ $? -ne 0 ]] || [[ "$response" == *"Entity not found"* ]] || [[ -z "$response" ]]; then
-        echo "Entities missing, reinitializing..."
-        backup_init_entities "$backup_type"
-    else
+    if [[ $? -eq 0 ]] && [[ "$response" != *"Entity not found"* ]] && [[ -n "$response" ]]; then
         echo "✓ Entities verified for $backup_type"
         ha_send_heartbeat "$backup_type"
+        return 0
+    else
+        echo "⚠ Entities missing for $backup_type - they will be created when needed"
+        return 1
     fi
 }
 
@@ -136,9 +137,6 @@ ha_ensure_entities() {
 backup_init_entities() {
     local backup_type="${1:-general}"
     echo "Initializing Home Assistant backup monitoring entities for: $backup_type"
-    
-    # Ensure entities before creating new ones
-    ha_ensure_entities "$backup_type"
     
     # Backup status (idle, running, success, failed)
     ha_update_sensor "backup_${backup_type}_status" "idle" "${backup_type^} Backup Status" "" "" "mdi:backup-restore"
@@ -180,11 +178,16 @@ backup_started() {
     local start_time=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
     echo "Recording $backup_type backup start at: $start_time"
     
-    # Ensure entities exist before updating
-    ha_ensure_entities "$backup_type"
-    
-    ha_update_sensor "backup_${backup_type}_status" "running" "${backup_type^} Backup Status" "" "" "mdi:backup-restore"
-    ha_update_sensor "backup_${backup_type}_last_started" "$start_time" "${backup_type^} Backup Last Started" "" "timestamp" "mdi:play-circle-outline"
+    # Initialize entities if this is the first run
+    if ! ha_ensure_entities "$backup_type"; then
+        echo "Initializing entities for first time use..."
+        # Create just the essential entities without recursion
+        ha_update_sensor "backup_${backup_type}_status" "running" "${backup_type^} Backup Status" "" "" "mdi:backup-restore"
+        ha_update_sensor "backup_${backup_type}_last_started" "$start_time" "${backup_type^} Backup Last Started" "" "timestamp" "mdi:play-circle-outline"
+    else
+        ha_update_sensor "backup_${backup_type}_status" "running" "${backup_type^} Backup Status" "" "" "mdi:backup-restore"
+        ha_update_sensor "backup_${backup_type}_last_started" "$start_time" "${backup_type^} Backup Last Started" "" "timestamp" "mdi:play-circle-outline"
+    fi
     
     # Store start time for duration calculation
     echo "$start_time" > "/tmp/backup_${backup_type}_start_time"
@@ -203,10 +206,7 @@ backup_finished() {
     
     echo "Recording $backup_type backup completion at: $end_time (exit code: $exit_code)"
     
-    # Ensure entities exist before updating
-    ha_ensure_entities "$backup_type"
-    
-    # Update end time
+    # Update entities (create if they don't exist)
     ha_update_sensor "backup_${backup_type}_last_finished" "$end_time" "${backup_type^} Backup Last Finished" "" "timestamp" "mdi:stop-circle-outline"
     
     # Calculate duration if start time exists
@@ -294,9 +294,7 @@ backup_reset_counters() {
     local backup_type="${1:-general}"
     echo "Resetting $backup_type backup counters..."
     
-    # Ensure entities exist before resetting
-    ha_ensure_entities "$backup_type"
-    
+    # Reset counters (create if they don't exist)
     ha_update_sensor "backup_${backup_type}_total_count" "0" "${backup_type^} Backup Total Count" "" "" "mdi:counter"
     ha_update_sensor "backup_${backup_type}_success_count" "0" "${backup_type^} Backup Success Count" "" "" "mdi:check-circle-outline"
     ha_update_sensor "backup_${backup_type}_failure_count" "0" "${backup_type^} Backup Failure Count" "" "" "mdi:alert-circle"
