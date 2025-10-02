@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # Simple Home Assistant device control function
+# Note: This script expects logging.sh to be sourced by the calling script
 # Usage: control_device <entity_id> <action> [wait_time]
 control_device() {    
     # Check arguments
     if [ $# -lt 2 ]; then
-        echo "Usage: control_device <entity_id> <action> [wait_time]"
-        echo "Example: control_device light.living_room turn_on"
-        echo "Example: control_device switch.desk_loop turn_off 45"
+        log_error "Usage: control_device <entity_id> <action> [wait_time]"
+        log_info "Example: control_device light.living_room turn_on"
+        log_info "Example: control_device switch.desk_loop turn_off 45"
         return 1
     fi
     
@@ -17,7 +18,7 @@ control_device() {
     
     # Validate required environment variables
     if [[ -z "$HA_URL" || -z "$HA_TOKEN" ]]; then
-        echo "✗ Error: HA_URL and HA_TOKEN environment variables must be set"
+        log_error "HA_URL and HA_TOKEN environment variables must be set"
         return 1
     fi
     
@@ -44,19 +45,19 @@ control_device() {
     
     # Check if request was successful
     if [[ "$http_code" == "200" ]]; then
-        echo "✓ Successfully called ${action} on ${entity_id}"
+        log_info "Successfully called ${action} on ${entity_id}"
         
         # Wait for specified time before continuing
         if [[ "$wait_time" =~ ^[0-9]+$ ]] && [ "$wait_time" -gt 0 ]; then
-            echo "⏳ Waiting ${wait_time} seconds before continuing..."
+            log_info "Waiting ${wait_time} seconds before continuing..."
             sleep "$wait_time"
-            echo "✓ Wait complete, continuing..."
+            log_info "Wait complete, continuing..."
         fi
         return 0
     else
-        echo "✗ Failed to call ${action} on ${entity_id} (HTTP: ${http_code})"
+        log_error "Failed to call ${action} on ${entity_id} (HTTP: ${http_code})"
         if [[ -n "$response_body" ]]; then
-            echo "Response: $response_body"
+            log_error "Response: $response_body"
         fi
         return 1
     fi

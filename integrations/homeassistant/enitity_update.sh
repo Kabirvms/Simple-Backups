@@ -10,7 +10,7 @@
 
 # === UTILITY FUNCTIONS ===
 
-# Create or update a Home Assistant sensor entity
+# Create or update a Home Assistant sensor entity with proper persistence
 # Usage: ha_update_sensor <entity_id> <state> <friendly_name> [unit] [device_class] [icon]
 ha_update_sensor() {
     local entity_id="$1"
@@ -32,7 +32,7 @@ ha_update_sensor() {
         return 0
     fi
     
-    # Build JSON payload using simple string concatenation
+    # Build JSON payload with proper attributes for persistence
     local json_payload='{"state": "'$state'", "attributes": {"friendly_name": "'$friendly_name'"'
     
     if [[ -n "$unit" ]]; then
@@ -43,26 +43,89 @@ ha_update_sensor() {
         json_payload="$json_payload"', "device_class": "'$device_class'"'
     fi
     
-    json_payload="$json_payload"', "icon": "'$icon'"}}'
+    # Add persistence attributes to prevent entity removal
+    json_payload="$json_payload"', "icon": "'$icon'"'
+    json_payload="$json_payload"', "last_updated": "'$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'"'
+    json_payload="$json_payload"', "source": "simple_backups"'
+    json_payload="$json_payload"', "entity_category": "diagnostic"'
+    json_payload="$json_payload"'}}'
     
-    # Create/update the sensor
+    # Create/update the sensor with retry logic
     local response
-    response=$(curl -s -w "%{http_code}" -X POST \
-        -H "Authorization: Bearer $HA_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload" \
-        "$HA_URL/api/states/sensor.$entity_id")
+    local attempts=0
+    local max_attempts=3
     
-    local http_code="${response: -3}"
+    while [[ $attempts -lt $max_attempts ]]; do
+        response=$(curl -s -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $HA_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload" \
+            "$HA_URL/api/states/sensor.$entity_id" 2>/dev/null)
+        
+        local http_code="${response: -3}"
+        
+        if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
+            echo "✓ Updated HA sensor: sensor.$entity_id = $state"
+            
+            # Store entity info for heartbeat
+            local entity_file="/tmp/ha_entities_${entity_id}"
+            echo "$(date +%s)|$entity_id|$friendly_name" > "$entity_file"
+            
+            return 0
+        else
+            ((attempts++))
+            echo "⚠ Attempt $attempts failed for HA sensor $entity_id (HTTP: $http_code)"
+            if [[ $attempts -lt $max_attempts ]]; then
+                sleep 2
+            fi
+        fi
+    done
     
-    if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
-        echo "✓ Updated HA sensor: sensor.$entity_id = $state"
+    echo "✗ Failed to update HA sensor $entity_id after $max_attempts attempts"
+    echo "JSON sent: $json_payload"
+    echo "Response: ${response%???}"
+    return 1
+}
+
+# Send heartbeat to prevent entity removal
+# Usage: ha_send_heartbeat [backup_type]
+ha_send_heartbeat() {
+    local backup_type="${1:-general}"
+    
+    if [[ -z "$HA_URL" || -z "$HA_TOKEN" ]]; then
         return 0
+    fi
+    
+    # Update a simple heartbeat sensor to keep entities alive
+    local heartbeat_time=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
+    ha_update_sensor "backup_${backup_type}_heartbeat" "$heartbeat_time" "${backup_type^} Backup Heartbeat" "" "timestamp" "mdi:heart-pulse"
+    
+    echo "✓ Sent heartbeat for $backup_type entities"
+}
+
+# Ensure entities are registered and available
+# Usage: ha_ensure_entities [backup_type]
+ha_ensure_entities() {
+    local backup_type="${1:-general}"
+    
+    if [[ -z "$HA_URL" || -z "$HA_TOKEN" ]]; then
+        return 0
+    fi
+    
+    echo "Ensuring entities are available for: $backup_type"
+    
+    # Check if main status entity exists, if not reinitialize all
+    local response
+    response=$(curl -s -X GET \
+        -H "Authorization: Bearer $HA_TOKEN" \
+        "$HA_URL/api/states/sensor.backup_${backup_type}_status" 2>/dev/null)
+    
+    if [[ $? -ne 0 ]] || [[ "$response" == *"Entity not found"* ]] || [[ -z "$response" ]]; then
+        echo "Entities missing, reinitializing..."
+        backup_init_entities "$backup_type"
     else
-        echo "✗ Failed to update HA sensor $entity_id (HTTP: $http_code)"
-        echo "JSON sent: $json_payload"
-        echo "Response: ${response%???}"
-        return 1
+        echo "✓ Entities verified for $backup_type"
+        ha_send_heartbeat "$backup_type"
     fi
 }
 
@@ -73,6 +136,9 @@ ha_update_sensor() {
 backup_init_entities() {
     local backup_type="${1:-general}"
     echo "Initializing Home Assistant backup monitoring entities for: $backup_type"
+    
+    # Ensure entities before creating new ones
+    ha_ensure_entities "$backup_type"
     
     # Backup status (idle, running, success, failed)
     ha_update_sensor "backup_${backup_type}_status" "idle" "${backup_type^} Backup Status" "" "" "mdi:backup-restore"
@@ -101,6 +167,9 @@ backup_init_entities() {
     # Failure count
     ha_update_sensor "backup_${backup_type}_failure_count" "0" "${backup_type^} Backup Failure Count" "" "" "mdi:alert-circle"
     
+    # Initialize heartbeat
+    ha_send_heartbeat "$backup_type"
+    
     echo "✓ Backup monitoring entities initialized for $backup_type"
 }
 
@@ -111,11 +180,17 @@ backup_started() {
     local start_time=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
     echo "Recording $backup_type backup start at: $start_time"
     
+    # Ensure entities exist before updating
+    ha_ensure_entities "$backup_type"
+    
     ha_update_sensor "backup_${backup_type}_status" "running" "${backup_type^} Backup Status" "" "" "mdi:backup-restore"
     ha_update_sensor "backup_${backup_type}_last_started" "$start_time" "${backup_type^} Backup Last Started" "" "timestamp" "mdi:play-circle-outline"
     
     # Store start time for duration calculation
     echo "$start_time" > "/tmp/backup_${backup_type}_start_time"
+    
+    # Send heartbeat
+    ha_send_heartbeat "$backup_type"
 }
 
 # Record backup completion
@@ -127,6 +202,9 @@ backup_finished() {
     local end_time=$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")
     
     echo "Recording $backup_type backup completion at: $end_time (exit code: $exit_code)"
+    
+    # Ensure entities exist before updating
+    ha_ensure_entities "$backup_type"
     
     # Update end time
     ha_update_sensor "backup_${backup_type}_last_finished" "$end_time" "${backup_type^} Backup Last Finished" "" "timestamp" "mdi:stop-circle-outline"
@@ -172,6 +250,9 @@ backup_finished() {
     
     # Increment total counter
     backup_increment_counter "total" "$backup_type"
+    
+    # Send final heartbeat
+    ha_send_heartbeat "$backup_type"
 }
 
 # Helper function to increment counters
@@ -213,9 +294,81 @@ backup_reset_counters() {
     local backup_type="${1:-general}"
     echo "Resetting $backup_type backup counters..."
     
+    # Ensure entities exist before resetting
+    ha_ensure_entities "$backup_type"
+    
     ha_update_sensor "backup_${backup_type}_total_count" "0" "${backup_type^} Backup Total Count" "" "" "mdi:counter"
     ha_update_sensor "backup_${backup_type}_success_count" "0" "${backup_type^} Backup Success Count" "" "" "mdi:check-circle-outline"
     ha_update_sensor "backup_${backup_type}_failure_count" "0" "${backup_type^} Backup Failure Count" "" "" "mdi:alert-circle"
     
+    # Send heartbeat after reset
+    ha_send_heartbeat "$backup_type"
+    
     echo "✓ $backup_type counters reset"
+}
+
+# Create a periodic heartbeat script to keep entities alive
+# Usage: create_heartbeat_script [backup_type] [interval_minutes]
+create_heartbeat_script() {
+    local backup_type="${1:-general}"
+    local interval="${2:-30}"  # Default 30 minutes
+    local script_path="/tmp/ha_heartbeat_${backup_type}.sh"
+    
+    cat > "$script_path" << EOF
+#!/bin/bash
+# Auto-generated heartbeat script for $backup_type backup entities
+# Sends periodic updates to prevent entity removal
+
+# Source the entity update functions
+source "$(dirname "\$0")/../integrations/homeassistant/enitity_update.sh"
+
+# Set environment variables (you may need to adjust these paths)
+if [[ -f "\$(dirname "\$0")/../.env" ]]; then
+    source "\$(dirname "\$0")/../.env"
+fi
+
+while true; do
+    echo "\$(date): Sending heartbeat for $backup_type entities"
+    ha_send_heartbeat "$backup_type"
+    sleep \$((60 * $interval))  # Sleep for $interval minutes
+done
+EOF
+    
+    chmod +x "$script_path"
+    echo "✓ Created heartbeat script: $script_path"
+    echo "  To run in background: nohup $script_path > /dev/null 2>&1 &"
+    echo "  To stop: pkill -f ha_heartbeat_${backup_type}"
+}
+
+# Start background heartbeat process
+# Usage: start_heartbeat_daemon [backup_type] [interval_minutes]
+start_heartbeat_daemon() {
+    local backup_type="${1:-general}"
+    local interval="${2:-30}"
+    
+    # Check if already running
+    if pgrep -f "ha_heartbeat_${backup_type}" > /dev/null; then
+        echo "Heartbeat daemon already running for $backup_type"
+        return 0
+    fi
+    
+    create_heartbeat_script "$backup_type" "$interval"
+    
+    local script_path="/tmp/ha_heartbeat_${backup_type}.sh"
+    nohup "$script_path" > "/tmp/ha_heartbeat_${backup_type}.log" 2>&1 &
+    
+    echo "✓ Started heartbeat daemon for $backup_type (PID: $!)"
+    echo "  Log file: /tmp/ha_heartbeat_${backup_type}.log"
+}
+
+# Stop background heartbeat process
+# Usage: stop_heartbeat_daemon [backup_type]
+stop_heartbeat_daemon() {
+    local backup_type="${1:-general}"
+    
+    if pkill -f "ha_heartbeat_${backup_type}"; then
+        echo "✓ Stopped heartbeat daemon for $backup_type"
+    else
+        echo "No heartbeat daemon running for $backup_type"
+    fi
 }
