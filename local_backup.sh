@@ -59,9 +59,9 @@ LOG_FILE="$LOGS_DIR/$(date +'%Y%m%d_%H%M%S').log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 log_info "Logging to file: $LOG_FILE"
 
-control_device "switch.desk_loop" "turn_on" 60
+control_device "switch.shelf_loop" "turn_on" 30
 
-control_device "switch.kv_imac" "turn_on" 300
+control_device "switch.sff_compute" "turn_on" 120
 
 # === MAIN BACKUP WORKFLOW ===
 main() {
@@ -93,9 +93,19 @@ main() {
         exit 1
     fi
     
+    Safely shutdown remote host using SSH
+    log_info "Initiating safe shutdown of remote host..."
+    if safe_shutdown "$REMOTE_HOST" "$REMOTE_USER" 5 30; then
+        log_info "Remote host shutdown completed successfully"
+    else
+        log_warning "Remote host shutdown may have failed or is taking longer than expected"
+        exit 9
+        # Continue with cleanup even if shutdown failed
+    fi
+
     log_info "=== Local Backup Process Completed Successfully ==="
-    control_device "switch.kv_imac" "turn_off" 60
-    control_device "switch.desk_loop" "turn_off" 5
+    control_device "switch.sff_compute" "turn_off" 60
+    control_device "switch.shelf_loop" "turn_off" 5
     log_info "Turning off devices after backup"
     backup_finished 0 "Success" "local"
     exit 0

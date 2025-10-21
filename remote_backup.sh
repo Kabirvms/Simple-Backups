@@ -60,7 +60,7 @@ LOG_FILE="$LOGS_DIR/$(date +'%Y%m%d_%H%M%S').log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 log_info "Logging to file: $LOG_FILE"
 
-control_device "switch.second_site" "turn_on" 180
+control_device "switch.remote_site" "turn_on" 180
 
 log_info "Establishing SSH connection to $REMOTE_USER@$REMOTE_HOST"
 tailscale up 
@@ -73,8 +73,7 @@ else
     # Initialize HA monitoring even for failed connection
     backup_started "remote"
     backup_finished 1 "Unable to reach remote host" "remote"
-    control_device "switch.second_site" "turn_off" 30
-    tailscale down
+    control_device "switch.remote_site" "turn_off" 30
     exit 1
 fi
 # === MAIN BACKUP WORKFLOW ===
@@ -119,10 +118,9 @@ main() {
     fi
     
     # Turn off the switch after shutdown
-    control_device "switch.second_site" "turn_off" 60
+    control_device "switch.remote_site" "turn_off" 60
     log_info "Turning off devices after backup and shutdown"
 
-    tailscale down
     backup_finished 0 "Success" "remote"
     exit 0
 }
