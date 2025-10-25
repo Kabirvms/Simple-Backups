@@ -20,7 +20,6 @@ fi
 REMOTE_USER="$REMOTE_BACKUP_USER"
 REMOTE_HOST="$REMOTE_BACKUP_HOST"
 REMOTE_STORAGE_LOCATION="$REMOTE_BACKUP_LOCATION"
-REMOTE_BASE_DIR="${REMOTE_STORAGE_LOCATION}"
 
 # Set up shared variables
 GRANDPARENT_DIR="$SCRIPT_DIR"
@@ -60,7 +59,7 @@ LOG_FILE="$LOGS_DIR/$(date +'%Y%m%d_%H%M%S').log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 log_info "Logging to file: $LOG_FILE"
 
-control_device "switch.remote_site" "turn_on" 180
+control_device "switch.remote_compute" "turn_on" 180
 
 log_info "Establishing SSH connection to $REMOTE_USER@$REMOTE_HOST"
 tailscale up 
@@ -118,7 +117,7 @@ main() {
     fi
     
     # Turn off the switch after shutdown
-    control_device "switch.remote_site" "turn_off" 60
+    control_device "switch.remote_compute" "turn_off" 60
     log_info "Turning off devices after backup and shutdown"
 
     backup_finished 0 "Success" "remote"
