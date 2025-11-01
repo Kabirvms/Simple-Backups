@@ -63,17 +63,16 @@ run_backup_items() {
         fi
     fi
 
-    # Affine Backup
-    log_info "Stopping Affine container..."
-    if manage_containers "stop" affine_postgres affine_redis affine_server; then
-        log_info "Affine container stopped successfully backup can proceed"
-        sync_dir "/home/kabir/affine/" "$REMOTE_STORAGE_LOCATION/affine" "Affine"
-        log_info "Starting Affine container..."
-        manage_containers "start" affine_postgres affine_redis affine_server
+    #authentik Backup
+    log_info "Stopping Authentik containers..."
+    if manage_containers "stop" authentik-server authentik-db authentik-worker; then
+        sync_dir "/home/kabir/authentik/" "$REMOTE_STORAGE_LOCATION/authentik" "Authentik"
+        log_info "Starting Authentik containers..."
+        manage_containers "start" authentik-server authentik-db authentik-worker 
     else
-        log_warning "Failed to stop Affine container"
+        log_warning "Failed to stop Authentik containers"
         exit 2
-    fi
+    fi  
 
     # Bytestash Backup
     log_info "Stopping Bytestash container..."
@@ -102,6 +101,29 @@ run_backup_items() {
         log_warning "Failed to stop ESPHome container"
         exit 2
     fi
+
+    #flatnotes Backup
+    log_info "Stopping flatnotes container..."
+    if manage_containers "stop" flatnotes; then
+        sync_dir "/home/kabir/flatnotes" "$REMOTE_STORAGE_LOCATION/flatnotes" "flatnotes"
+        log_info "Starting flatnotes container..."
+        manage_containers "start" flatnotes
+    else
+        log_warning "Failed to stop flatnotes container"
+        exit 2
+    fi
+
+    #grist Backup
+    log_info "Stopping Grist container..."
+    if manage_containers "stop" grist; then
+        sync_dir "/home/kabir/grist/data/" "$REMOTE_STORAGE_LOCATION/grist" "Grist"
+        log_info "Starting Grist container..."
+        manage_containers "start" grist
+    else
+        log_warning "Failed to stop Grist container"
+        exit 2
+    fi
+
     # Home Assistant Backup
     log_info "Backing up Home Assistant"
     sync_dir "/home/kabir/homeassistant/hass-config/backups/" "$REMOTE_STORAGE_LOCATION/homeassistant" "Home Assistant" 

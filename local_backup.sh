@@ -95,7 +95,7 @@ main() {
     fi
 
     log_info "Initiating safe shutdown of remote host..."
-    if safe_shutdown "$REMOTE_HOST" "$REMOTE_USER" 5 30; then
+    if safe_shutdown "$REMOTE_HOST" "$REMOTE_USER" 5 80; then
         log_info "Remote host shutdown completed successfully"
     else
         log_warning "Remote host shutdown may have failed or is taking longer than expected"
